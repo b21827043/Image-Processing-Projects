@@ -1,2 +1,2 @@
-![alt text](images/result.jpg)
+![alt text](images/result.png)
 
