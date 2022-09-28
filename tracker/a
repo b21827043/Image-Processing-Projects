@@ -1,0 +1,2 @@
+g++ main.cpp -I/usr/local/include/opencv4/ -lopencv_core -lopencv_videoio -lopencv_highgui -lopencv_tracking -lopencv_imgproc 
+
