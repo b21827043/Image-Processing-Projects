@@ -1,0 +1,213 @@
+#include <opencv2/core/core.hpp>
+#include <opencv2/highgui/highgui.hpp>
+#include <opencv2/imgproc/imgproc.hpp>
+#include <opencv2/tracking.hpp>
+#include <opencv2/core/utility.hpp>
+#include <opencv2/videoio.hpp>
+#include <iostream>
+#include <stdio.h>
+#include <vector>
+#include "yolo-fastestv2.h"
+#include <list>
+#include <vector>
+#include <unistd.h>
+
+yoloFastestv2 yoloF2;
+
+const char* class_names[] = {
+    "background", "person", "bicycle",
+    "car", "motorbike", "aeroplane", "bus", "train", "truck",
+    "boat", "traffic light", "fire hydrant", "stop sign",
+    "parking meter", "bench", "bird", "cat", "dog", "horse",
+    "sheep", "cow", "elephant", "bear", "zebra", "giraffe",
+    "backpack", "umbrella", "handbag", "tie", "suitcase",
+    "frisbee", "skis", "snowboard", "sports ball", "kite",
+    "baseball bat", "baseball glove", "skateboard", "surfboard",
+    "tennis racket", "bottle", "wine glass", "cup", "fork",
+    "knife", "spoon", "bowl", "banana", "apple", "sandwich",
+    "orange", "broccoli", "carrot", "hot dog", "pizza", "donut",
+    "cake", "chair", "sofa", "pottedplant", "bed", "diningtable",
+    "toilet", "tvmonitor", "laptop", "mouse", "remote", "keyboard",
+    "cell phone", "microwave", "oven", "toaster", "sink",
+    "refrigerator", "book", "clock", "vase", "scissors",
+    "teddy bear", "hair drier", "toothbrush"
+};
+
+std::list<int> objectLabelIdList = {1,2,3,4,5,6,7,8};
+cv::Point point;
+cv::Rect2d roi = cv::Rect(0,0,4,4);
+cv::Ptr<cv::Tracker> tracker = cv::TrackerCSRT::create();
+
+bool value = true;
+bool start = false;
+bool detectPoint = false;
+
+void onMouse(int action,int x,int y,int,void*) {
+    if (action == cv::EVENT_LBUTTONDOWN) {
+        point =cv::Point{x,y};
+
+        if (value == true) {
+            detectPoint = true;
+        }
+
+        //roi =cv::Rect((x*1.0),(y*1.0),20,50);
+        if (value == false) {
+            value = true;
+        };
+
+    }
+}
+
+
+
+static void draw_objects(cv::Mat& cvImg, const std::vector<TargetBox>& boxes)
+{
+    for(size_t i = 0; i < boxes.size(); i++) {
+        if ((std::find(objectLabelIdList.begin(),objectLabelIdList.end(),(int)boxes[i].cate+1)) != objectLabelIdList.end()){
+        //std::cout<<boxes[i].x1<<" "<<boxes[i].y1<<" "<<boxes[i].x2<<" "<<boxes[i].y2<<" "<<boxes[i].score<<" "<<boxes[i].cate<<std::endl;
+
+
+            char text[256];
+            sprintf(text, "%s %.1f%%", class_names[boxes[i].cate+1], boxes[i].score * 100);
+
+            int baseLine = 0;
+            cv::Size label_size = cv::getTextSize(text, cv::FONT_HERSHEY_SIMPLEX, 0.5, 1, &baseLine);
+
+            int x = boxes[i].x1;
+            int y = boxes[i].y1 - label_size.height - baseLine;
+            if (y < 0) y = 0;
+            if (x + label_size.width > cvImg.cols) x = cvImg.cols - label_size.width;
+
+            cv::rectangle(cvImg, cv::Rect(cv::Point(x, y), cv::Size(label_size.width, label_size.height + baseLine)),
+                          cv::Scalar(255, 255, 255), -1);
+
+            cv::putText(cvImg, text, cv::Point(x, y + label_size.height),
+                        cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 0));
+
+
+
+
+            cv::rectangle (cvImg, cv::Point(boxes[i].x1, boxes[i].y1),
+                           cv::Point(boxes[i].x2, boxes[i].y2), cv::Scalar(255,0,0));
+        }
+    }
+}
+
+int main(int argc, char** argv)
+{
+    float f;
+    float FPS[16];
+    int i,Fcnt=0;
+    cv::Mat frame;
+    cv::Mat compFrame;
+    //some timing
+    std::chrono::steady_clock::time_point Tbegin, Tend;
+
+    for(i=0;i<16;i++) FPS[i]=0.0;
+
+    yoloF2.init(false); //we have no GPU
+
+    yoloF2.loadModel("yolo-fastestv2-opt.param","yolo-fastestv2-opt.bin");
+
+    cv::VideoCapture cap(4);
+
+    //cap.set(cv::CAP_PROP_FRAME_WIDTH,160);
+    //cap.set(cv::CAP_PROP_FRAME_HEIGHT,120);
+    std::cout<<cap.get(cv::CAP_PROP_FRAME_WIDTH)<<std::endl;
+    std::cout<<cap.get(cv::CAP_PROP_FRAME_HEIGHT)<<std::endl;
+
+    cv::namedWindow("RaspPi4",1);
+
+
+    //cv::Ptr<cv::Tracker> tracker = cv::TrackerCSRT::create();
+
+    cap >> frame;
+    cv::resize(frame, compFrame, cv::Size(160,120));
+
+
+    if (!cap.isOpened()) {
+        std::cerr << "ERROR: Unable to open the camera" << std::endl;
+        return 0;
+    }
+
+    std::cout << "Start grabbing, press ESC on Live window to terminate" << std::endl;
+	while(1){
+
+        cap >> frame;
+        cv::resize(frame, compFrame, cv::Size(160,120));
+
+        if (frame.empty()) {
+            std::cerr << "ERROR: Unable to grab from the camera" << std::endl;
+            break;
+        }
+
+        Tbegin = std::chrono::steady_clock::now();
+
+        std::vector<TargetBox> boxes;
+        cv::setMouseCallback("RaspPi4",onMouse);
+
+        // Object Detection
+        if (value == true){
+            start = false;
+
+            yoloF2.detection(frame, boxes);
+
+            if (detectPoint == true){
+                std::cout<<10<<std::endl;
+                for(size_t i = 0; i < boxes.size(); i++) {
+
+                    if (boxes[i].x1 < (int)point.x && (int)point.x < boxes[i].x2 && boxes[i].y1 < (int)point.y && (int)point.y < boxes[i].y2){
+                        std::cout<<20<<std::endl;
+                        roi=cv::Rect((boxes[i].x1/4),(boxes[i].y1/4),((boxes[i].x2-boxes[i].x1)/4),((boxes[i].y2-boxes[i].y1)/4));
+                        std::cout<<roi.x<<" "<<roi.y<<std::endl;
+                    }
+                }
+
+                value = false;
+            }
+
+            draw_objects(frame, boxes);
+
+        }
+
+
+        // Object Tracking
+
+        if (value == false){
+
+            detectPoint = false;
+            if (start == false){
+                std::cout<<30<<std::endl;
+                tracker = cv::TrackerCSRT::create();
+                tracker->init(compFrame,roi);
+                start = true;
+                std::cout<<roi.x<<" "<<roi.y<<std::endl;
+            };
+
+            tracker->update(compFrame,roi);
+            rectangle(frame,cv::Rect((roi.x*4),(roi.y*4),(roi.width*4),(roi.height*4)),cv::Scalar(255,0,0),2,1);
+
+
+
+
+        };
+
+
+
+
+        Tend = std::chrono::steady_clock::now();
+
+        //calculate frame rate
+        f = std::chrono::duration_cast <std::chrono::milliseconds> (Tend - Tbegin).count();
+        if(f>0.0) FPS[((Fcnt++)&0x0F)]=1000.0/f;
+        for(f=0.0, i=0;i<16;i++){ f+=FPS[i]; }
+        putText(frame, cv::format("FPS %0.2f", f/16),cv::Point(10,20),cv::FONT_HERSHEY_SIMPLEX,0.6, cv::Scalar(0, 0, 255));
+
+        //show outputstd::cerr << "ERROR: Unable to grab from the camera" << std::endl;
+        cv::imshow("RaspPi4",frame);
+        //cv::imwrite("test.jpg",frame);
+        char esc = cv::waitKey(5);
+        if(esc == 27) break;
+	}
+    return 0;
+}
