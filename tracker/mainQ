@@ -1,0 +1,183 @@
+#include <iostream>
+#include <regex>
+#include "dehaze.h"
+
+using namespace std;
+using namespace cv;
+
+int filterRadius = 4;
+
+int judgeFileType(string fileName);
+//评价图像
+void calcEvaluatingIndicator(const Mat& src);
+
+int main(int argc, char *argv[]) {
+
+    float f;
+    float FPS[16];
+    int i,Fcnt=0;
+    chrono::steady_clock::time_point Tbegin, Tend;
+    for(i=0;i<16;i++) FPS[i]=0.0;
+
+    Mat image;
+
+
+
+    //lower bound t0
+    const double t0 = 0.1;
+
+    //keep more haze for the distant objects
+    const double omega = 0.95;
+
+    //regularization parameter
+    const double eps = 10E-6;
+
+
+
+    /*
+    Mat src = imread("4.jpg");
+    imshow("source image",src);
+
+//开始计时
+    double start =clock();
+
+    DeHaze deHaze(filterRadius,t0,omega,eps);
+    Mat recover = deHaze.imageHazeRemove(src);
+
+//        calcEvaluatingIndicator(recover);
+
+//停止计时
+    double stop = clock();
+
+
+
+    imshow("recover image",recover);
+
+    waitKey(0);
+    */
+    
+
+    VideoCapture cap("3.mp4");
+    namedWindow("Slider");//Declaring window to show the image//
+    createTrackbar("filterRadius", "Slider", &filterRadius, 100);//creating a trackbar//
+    
+    double rate = cap.get(CAP_PROP_FPS);
+    DeHaze deHaze(filterRadius, t0, omega, eps);
+    deHaze.setFPS(rate);
+
+    if (!cap.isOpened()) {
+
+    cout << "cannot open camera";
+
+    }
+    
+    VideoWriter video("outcpp.avi", VideoWriter::fourcc('M','J','P','G'), 30, Size(1280,720));
+    
+
+    while (true) {
+    cap >> image;
+    imshow("Display window", image);
+    //cout << filterRadius << endl;
+    Tbegin = std::chrono::steady_clock::now();
+    deHaze.setR(filterRadius);
+    Mat result = deHaze.videoHazeRemove(image);
+    Tend = std::chrono::steady_clock::now();
+    video.write(result);
+    //calculate frame rate
+    f = std::chrono::duration_cast <std::chrono::milliseconds> (Tend - Tbegin).count();
+    if(f>0.0) FPS[((Fcnt++)&0x0F)]=1000.0/f;
+    for(f=0.0, i=0;i<16;i++){ f+=FPS[i]; }
+    putText(result, cv::format("FPS %0.2f", f/16),cv::Point(10,20),cv::FONT_HERSHEY_SIMPLEX,0.6, cv::Scalar(0, 0, 255));
+    imshow("result",result);
+    waitKey(25);
+
+    }
+    
+return 0;
+
+}
+
+int judgeFileType(string fileName){
+    int pos = fileName.find('.');
+    string hz = fileName.substr(pos+1);
+    transform(hz.begin(),hz.end(),hz.begin(),::tolower);
+    regex imagePattern("jpg|png|bmp|jpeg");
+    regex videoPattern("avi|mp4|rm|rmvb|3gp|wmv");
+    if (regex_match(hz,imagePattern)){
+        return 0;
+    }
+    if (regex_match(hz,videoPattern)){
+        return 1;
+    }
+    return -1;
+
+}
+
+//评价图像
+void calcEvaluatingIndicator(const Mat& src){
+    CV_Assert(src.type() == CV_8UC3);
+
+    //均值
+    Scalar mean;
+    //标准差
+    Scalar std;
+    meanStdDev(src,mean,std);
+
+    cout << "图像均值为：" <<  (mean.val[0] + mean.val[1] + mean.val[2])/3 << endl;
+    cout << "图像标准差为：" <<  (std.val[0] + std.val[1] + std.val[2])/3 << endl;
+
+    int border=1;
+    //边缘扩大
+    Mat borderTemp(src.rows + border*2, src.cols + border*2, src.depth());
+    copyMakeBorder(src, borderTemp, border, border,
+                   border, border, BORDER_REPLICATE);
+
+    double gradientSum = 0;
+
+    for (int i = 1; i < borderTemp.rows-1; ++i) {
+        for (int j = 1; j < borderTemp.cols-1; ++j) {
+            Vec3b valueX = borderTemp.at<Vec3b>(i,j-1);
+            Vec3b valueY = borderTemp.at<Vec3b>(i-1,j);
+            Vec3b value = borderTemp.at<Vec3b>(i,j);
+            gradientSum += sqrt((value[0] - valueX[0])*(value[0] - valueX[0])
+                                + (value[0] - valueY[0])*(value[0] - valueY[0]))
+                           + sqrt((value[1] - valueX[1])*(value[1] - valueX[1])
+                                  + (value[1] - valueY[1])*(value[1] - valueY[1]))
+                           + sqrt((value[2] - valueX[2])*(value[2] - valueX[2])
+                                  + (value[2] - valueY[2])*(value[2] - valueY[2]));
+        }
+    }
+
+    cout << "图像平均梯度为：" <<  gradientSum/src.cols/src.rows/src.channels() << endl;
+
+    //熵值(平均信息量)
+    double result = 0;
+    double pixelRate[256]={0};
+    Mat gray;
+
+    cvtColor(src,gray,COLOR_BGR2GRAY);
+
+    for (int i = 0; i < gray.rows; ++i) {
+        for (int j = 0; j < gray.cols; ++j) {
+            pixelRate[gray.at<uchar>(i,j)]++;
+        }
+    }
+
+    for(int i=0;i<256;i++)
+    {
+        pixelRate[i] = pixelRate[i]/(src.rows*src.cols);
+    }
+
+
+    // 根据定义计算图像熵
+    for(int i =0;i<256;i++)
+    {
+        if(pixelRate[i]==0.0)
+            result = result;
+        else
+            result = result-pixelRate[i]*(log(pixelRate[i])/log(2.0));
+    }
+
+    cout << "图像信息熵为：" <<  result << endl;
+
+}
