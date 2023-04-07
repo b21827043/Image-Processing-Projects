@@ -3,42 +3,53 @@
 
 using namespace cv;
 
-int main(int argc, char** argv)
+int main()
 {
-    // Görüntü yükleme ve boyutlandırma
+    // Görüntüyü yükleme
     Mat img = imread("path/to/image.jpg");
-    resize(img, img, Size(500, 500));
 
-    // Görüntüyü gri tona dönüştürme
+    // Görüntüyü boyutlandırma ve gri tonlamaya dönüştürme
+    resize(img, img, Size(500, 500));
     Mat gray;
     cvtColor(img, gray, COLOR_BGR2GRAY);
 
-    // Gövde bölgesinin tespiti için threshold uygulama
-    int threshold_value = 200;
+    // Görüntüyü eşikleme
     Mat binary;
-    threshold(gray, binary, threshold_value, 255, THRESH_BINARY_INV);
+    threshold(gray, binary, 127, 255, THRESH_BINARY);
 
-    // Gövde bölgesini tespit etmek için yatay çizgi hesaplama
-    int height = binary.rows;
-    int width = binary.cols;
-    int line_position = int(height * 0.6);
-    Mat line_pixels = binary.row(line_position);
-    int line_pixels_sum = countNonZero(line_pixels);
+    // Morfolojik işlemler
+    Mat kernel = getStructuringElement(MORPH_RECT, Size(15, 15));
+    morphologyEx(binary, binary, MORPH_CLOSE, kernel);
 
-    // Gövde bölgesinin hesaplanması
-    Mat torso_pixels = binary(Rect(0, line_position, width, height - line_position));
-    int torso_pixels_sum = countNonZero(torso_pixels);
-    float torso_pixels_ratio = float(torso_pixels_sum) / float(width * (height - line_position));
+    // Konturları bulma
+    std::vector<std::vector<Point>> contours;
+    std::vector<Vec4i> hierarchy;
+    findContours(binary, contours, hierarchy, RETR_TREE, CHAIN_APPROX_SIMPLE);
 
-    // Gövde bölgesinin tespit edilmesi
-    if (line_pixels_sum > (width / 3) && torso_pixels_ratio > 0.05) {
-        line(img, Point(0, line_position), Point(width, line_position), Scalar(0, 255, 0), 2);
-        imshow("Image with torso detection", img);
+    // En büyük konturu bulma
+    int max_contour_index = -1;
+    double max_contour_area = 0.0;
+    for (int i = 0; i < contours.size(); i++)
+    {
+        double area = contourArea(contours[i]);
+        if (area > max_contour_area)
+        {
+            max_contour_area = area;
+            max_contour_index = i;
+        }
     }
-    else {
-        std::cout << "Torso not found." << std::endl;
-    }
+    std::vector<Point> max_contour = contours[max_contour_index];
 
+    // Konturun minimum dikdörtgen kutusunu bulma
+    Rect bounding_rect = boundingRect(max_contour);
+
+    // Dikdörtgen kutuyu çizme
+    rectangle(img, bounding_rect, Scalar(0, 255, 0), 2);
+
+    // Görüntüyü gösterme
+    imshow("Image", img);
     waitKey(0);
+    destroyAllWindows();
+
     return 0;
 }
